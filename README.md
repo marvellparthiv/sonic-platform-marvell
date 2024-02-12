@@ -1,2 +1,2 @@
-# sonic-platform-innovium
-Innovium platform files submodule
+# sonic-platform-marvell
+SONiC platform monitoring for Marvell Teralynx switching platforms.
