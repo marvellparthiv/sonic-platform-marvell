@@ -158,7 +158,7 @@ def log_os_system(cmd, show):
     return  status, output
 
 def driver_inserted():
-    ret, lsmod = log_os_system("lsmod | grep marvell", 0)
+    ret, lsmod = log_os_system("lsmod | grep kemp", 0)
     logging.info('mods:'+lsmod)
     if len(lsmod) ==0:
         return False
@@ -167,13 +167,14 @@ def driver_inserted():
 kos = [
 'modprobe i2c_dev',
 'modprobe at24',
-'modprobe marvell_dbmvtx9180_cpld',
-'modprobe marvell_dbmvtx9180_oom',
-'modprobe marvell_dbmvtx9180_leds']
+'modprobe kempld_core',
+'modprobe i2c_kempld',
+'modprobe gpio_kempld']
 
 def driver_install():
     global FORCE
     log_os_system("depmod", 1)
+
     for i in range(0,len(kos)):
         status, output = log_os_system(kos[i], 1)
         time.sleep(1)
@@ -199,66 +200,10 @@ def driver_uninstall():
 
 def device_install():
     global FORCE
-    for i in range(0,len(mknod)):
-        print("init i2c device instance")
-        status, output = log_os_system(mknod[i], 1)
-        if status:
-            print(output)
-            if FORCE == 0:
-                return status
-
-    for i in range(0,len(sfp_map)):
-        status, output = log_os_system("echo dbmvtx9180_oom 0x"+str(sfp_map[i])+ " > /sys/bus/i2c/devices/i2c-0/new_device", 1)
-        if status:
-            print(output)
-            if FORCE == 0:
-                return status
-
-    for i in range(0,len(sfp_map)):
-        status, output =log_os_system("echo port"+str(i+1)+" > /sys/bus/i2c/devices/0-00"+str(sfp_map[i])+"/port_name", 1)
-        if status:
-            print(output)
-            if FORCE == 0:
-                return status
-
-    status, output = log_os_system("cp /usr/share/sonic/device/x86_64-marvell_dbmvtx9180-r0/smartd.conf /etc/;systemctl restart smartd.service", 1)
-    if status:
-        print(output)
-        if FORCE == 0:
-            return status
-
-    status, output = log_os_system("cp /usr/share/sonic/device/x86_64-marvell_dbmvtx9180-r0/watchdog-control.service /usr/lib/systemd/system/", 1)
-    if status:
-        print(output)
-        if FORCE == 0:
-            return status
     return
 
 def device_uninstall():
     global FORCE
-
-    for i in range(0,len(sfp_map)):
-        target = "echo 0x"+str(sfp_map[i])+ " > /sys/bus/i2c/devices/i2c-0/delete_device"
-        print(target)
-        status, output =log_os_system(target, 1)
-        if status:
-            print(output)
-            if FORCE == 0:
-                return status
-
-    nodelist = mknod
-
-    for i in range(len(nodelist)):
-        target = nodelist[-(i+1)]
-        temp = target.split()
-        del temp[1]
-        temp[-1] = temp[-1].replace('new_device', 'delete_device')
-        status, output = log_os_system(" ".join(temp), 1)
-        if status:
-            print(output)
-            if FORCE == 0:
-                return status
-
     return
 
 def system_ready():
@@ -273,16 +218,26 @@ def do_install():
     if driver_inserted() == False:
         status = driver_install()
         time.sleep(1)
-        print(PROJECT_NAME.upper()+"Drivers KS2 freshly installed..")
+        print(PROJECT_NAME.upper()+"Drivers freshly installed..")
         if status:
             if FORCE == 0:
                 return  status
     else:
-        print(PROJECT_NAME.upper()+" drivers detected....")
+        print("Removing installed driver....")
+        status = driver_uninstall()
+        if status:
+            if FORCE == 0:
+                return  status
+        status = driver_install()
+        time.sleep(1)
+        print(PROJECT_NAME.upper()+"Drivers Re-installed with new params")
+        if status:
+            if FORCE == 0:
+                return  status
 
     if not device_exist():
         status = device_install()
-        print(PROJECT_NAME.upper()+"Devices KS2 freshly installed..")
+        print(PROJECT_NAME.upper()+"Devices freshly installed..")
         if status:
             if FORCE == 0:
                 return  status
