@@ -1,2 +1,4 @@
-__all__ = ["platform", "chassis", "sfp", "eeprom", "psu", "thermal", "fan", "watchdog", 'component']
+# All the derived classes for PDDF
+__all__ = ["platform", "chassis", "sfp", "psu", "thermal", "fan"]
 from . import platform
+

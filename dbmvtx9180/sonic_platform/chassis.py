@@ -1,146 +1,182 @@
 #!/usr/bin/env python
 
 #############################################################################
-#
-# Module contains an implementation of SONiC Platform Base API and
-# provides the Chassis information which are available in the platform
+# PDDF
+# Module contains an implementation of SONiC Chassis API
 #
 #############################################################################
+
 try:
-    import sys
     import time
-    import subprocess
-    from sonic_platform_base.chassis_base import ChassisBase
+    import sys
+    from sonic_platform_pddf_base.pddf_chassis import PddfChassis
+    from sonic_py_common import device_info
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
-NUM_FAN = 14
-NUM_FANTRAY = 7
-NUM_PSU = 2
-NUM_THERMAL = 7
-NUM_SFP = 32
-NUM_COMPONENT = 6
-HOST_REBOOT_CAUSE_PATH = "/host/reboot-cause/"
-PMON_REBOOT_CAUSE_PATH = "/usr/share/sonic/platform/api_files/reboot-cause/"
-REBOOT_CAUSE_FILE = "reboot-cause.txt"
-PREV_REBOOT_CAUSE_FILE = "previous-reboot-cause.txt"
-HOST_CHK_CMD = ["docker"]
-GET_HWSKU_CMD = ["sonic-cfggen", "-d", "-v", "DEVICE_METADATA.localhost.hwsku"]
-GET_PLATFORM_CMD = ["sonic-cfggen", "-d", "-v", "DEVICE_METADATA.localhost.platform"]
+NUM_COMPONENT = 2
 
+class Chassis(PddfChassis):
+    """
+    PDDF Platform-specific Chassis class
+    """
 
-class Chassis(ChassisBase):
-    """Platform-specific Chassis class"""
+    port_dict = {}
 
-    def __init__(self):
-        super(Chassis, self).__init__()
+    def __init__(self, pddf_data=None, pddf_plugin_data=None):
+        PddfChassis.__init__(self, pddf_data, pddf_plugin_data)
+        self._initialize_components()
 
-        # Initialize SKU name and Platform name
-        self.sku_name = self._get_sku_name()
-        self.platform_name = self._get_platform_name()
-        self.name = self.sku_name
-
-        self._transceiver_presence = [0] * NUM_SFP
-
-        self.__initialize_fan()
-        self.__initialize_psu()
-        self.__initialize_thermals()
-        self.__initialize_sfp()
-        self.__initialize_eeprom()
-        self.__initialize_components()
-
-    def __initialize_sfp(self):
-        from sonic_platform.sfp import Sfp
-        for index in range(0, NUM_SFP):
-            sfp_module = Sfp(index, 'QSFP_DD')
-            self._sfp_list.append(sfp_module)
-
-    def __initialize_fan(self):
-        from sonic_platform.fan_drawer import FanDrawer
-        for fan_index in range(0, NUM_FANTRAY):
-            fandrawer = FanDrawer(fan_index)
-            self._fan_drawer_list.append(fandrawer)
-            self._fan_list.extend(fandrawer._fan_list)
-
-    def __initialize_psu(self):
-        from sonic_platform.psu import Psu
-        for index in range(0, NUM_PSU):
-            psu = Psu(index)
-            self._psu_list.append(psu)
-
-    def __initialize_thermals(self):
-        from sonic_platform.thermal import Thermal
-        for index in range(0, NUM_THERMAL):
-            thermal = Thermal(index)
-            self._thermal_list.append(thermal)
-
-    def __initialize_eeprom(self):
-        #from sonic_platform.eeprom import Tlv
-        #self._eeprom = Tlv()
-        return 0
-
-    def __initialize_components(self):
+    def _initialize_components(self):
         from sonic_platform.component import Component
-        for index in range(0, NUM_COMPONENT):
+        for index in range(NUM_COMPONENT):
             component = Component(index)
             self._component_list.append(component)
-
-    def __is_host(self):
-        return subprocess.call(HOST_CHK_CMD) == 0
-
-    def __read_txt_file(self, file_path):
-        try:
-            with open(file_path, 'r') as fd:
-                data = fd.read()
-                return data.strip()
-        except IOError:
-            pass
-        return None
-
-    def _get_sku_name(self):
-        p = subprocess.Popen(GET_HWSKU_CMD, stdout=subprocess.PIPE)
-        out, err = p.communicate()
-        return out.decode().rstrip('\n')
-
-    def _get_platform_name(self):
-        p = subprocess.Popen(GET_PLATFORM_CMD, stdout=subprocess.PIPE)
-        out, err = p.communicate()
-        return out.decode().rstrip('\n')
-
+            
+    # Provide the functions/variables below for which implementation is to be overwritten
     def get_name(self):
         """
-        Retrieves the name of the device
+        Retrieves the name of the chassis
         Returns:
-            string: The name of the device
+            string: The name of the chassis
         """
-        return self.name
+        return self._eeprom.platform_name_str()
 
-    def get_base_mac(self):
-        """
-        Retrieves the base MAC address for the chassis
-        Returns:
-            A string containing the MAC address in the format
-            'XX:XX:XX:XX:XX:XX'
-        """
-        return self._eeprom.get_mac()
+    def initizalize_system_led(self):
+        return True
 
-    def get_serial(self):
-        """
-        Retrieves the hardware serial number for the chassis
-        Returns:
-            A string containing the hardware serial number for this chassis.
-        """
-        return self._eeprom.get_serial()
+    def get_status_led(self):
+        return self.get_system_led("SYS_LED")
 
-    def get_system_eeprom_info(self):
+    def get_change_event(self, timeout=0):
         """
-        Retrieves the full content of system EEPROM information for the chassis
+        Returns a nested dictionary containing all devices which have
+        experienced a change at chassis level
+        Args:
+            timeout: Timeout in milliseconds (optional). If timeout == 0,
+                this method will block until a change is detected.
         Returns:
-            A dictionary where keys are the type code defined in
-            OCP ONIE TlvInfo EEPROM format and values are their corresponding
-            values.
+            (bool, dict):
+                - bool: True if call successful, False if not;
+                - dict: A nested dictionary where key is a device type,
+                        value is a dictionary with key:value pairs in the format of
+                        {'device_id':'device_event'}, where device_id is the device ID
+                        for this device and device_event.
+                        The known devices's device_id and device_event was defined as table below.
+                         -----------------------------------------------------------------
+                         device   |     device_id       |  device_event  |  annotate
+                         -----------------------------------------------------------------
+                         'sfp'          '<sfp number>'     '0'              Sfp removed
+                                                           '1'              Sfp inserted
+                                                           '2'              I2C bus stuck
+                                                           '3'              Bad eeprom
+                                                           '4'              Unsupported cable
+                                                           '5'              High Temperature
+                                                           '6'              Bad cable
+                         --------------------------------------------------------------------
+                  Ex. 'sfp':{'11':'0', '12':'1'},
+                  Indicates that:
+                     sfp 11 has been removed, sfp 12 has been inserted.
+                  Note: For sfp, when event 3-6 happened, the module will not be avalaible,
+                        XCVRD shall stop to read eeprom before SFP recovered from error status.
         """
-        return self._eeprom.get_eeprom()
+
+        change_event_dict = {"sfp": {}}
+
+        start_time = time.time()
+        forever = False
+
+        if timeout == 0:
+            forever = True
+        elif timeout > 0:
+            timeout = timeout / float(1000)  # Convert to secs
+        else:
+            print("get_change_event:Invalid timeout value", timeout)
+            return False, change_event_dict
+
+        end_time = start_time + timeout
+        if start_time > end_time:
+            print(
+                "get_change_event:" "time wrap / invalid timeout value",
+                timeout,
+            )
+            return False, change_event_dict  # Time wrap or possibly incorrect timeout
+        try:
+            while timeout >= 0:
+                # check for sfp
+                sfp_change_dict = self.get_transceiver_change_event()
+
+                if sfp_change_dict:
+                    change_event_dict["sfp"] = sfp_change_dict
+                    return True, change_event_dict
+                if forever:
+                    time.sleep(1)
+                else:
+                    timeout = end_time - time.time()
+                    if timeout >= 1:
+                        time.sleep(1)  # We poll at 1 second granularity
+                    else:
+                        if timeout > 0:
+                            time.sleep(timeout)
+                        return True, change_event_dict
+        except Exception as e:
+            print(e)
+        print("get_change_event: Should not reach here.")
+        return False, change_event_dict
+
+    def get_transceiver_change_event(self, timeout=0):
+        current_port_dict = {}
+        ret_dict = {}
+
+        # Check for OIR events and return ret_dict
+        for index in range(self.platform_inventory['num_ports']):
+            if self._sfp_list[index].get_presence():
+                current_port_dict[index] = self.plugin_data['XCVR']['plug_status']['inserted']
+            else:
+                current_port_dict[index] = self.plugin_data['XCVR']['plug_status']['removed']
+
+        if len(self.port_dict) == 0:       # first time
+            self.port_dict = current_port_dict
+            return {}
+
+        if current_port_dict == self.port_dict:
+            return {}
+
+        # Update reg value
+        for index, status in current_port_dict.items():
+            if self.port_dict[index] != status:
+                ret_dict[index] = status
+                #ret_dict[str(index)] = status
+        self.port_dict = current_port_dict
+        for index, status in ret_dict.items():
+            if int(status) == 1:
+                pass
+                #self._sfp_list[int(index)].check_sfp_optoe_type()
+        return ret_dict
+
+    def get_sfp(self, index):
+        """
+        Retrieves sfp represented by (1-based) index <index>
+
+        Args:
+            index: An integer, the index (1-based) of the sfp to retrieve.
+            The index should be the sequence of a physical port in a chassis,
+            starting from 1.
+            For example, 1 for Ethernet0, 2 for Ethernet4 and so on.
+
+        Returns:
+            An object derived from SfpBase representing the specified sfp
+        """
+        sfp = None
+
+        try:
+            # The index will start from 1
+            # sfputil already convert to physical port index according to config
+            sfp = self._sfp_list[index]
+        except IndexError:
+            sys.stderr.write("SFP index {} out of range (1-{})\n".format(
+                             index, len(self._sfp_list)))
+        return sfp        
 
     def get_reboot_cause(self):
         """
@@ -154,173 +190,24 @@ class Chassis(ChassisBase):
             to pass a description of the reboot cause.
         """
 
-        reboot_cause_path = (HOST_REBOOT_CAUSE_PATH + REBOOT_CAUSE_FILE) if self.__is_host(
-        ) else PMON_REBOOT_CAUSE_PATH + REBOOT_CAUSE_FILE
-        sw_reboot_cause = self.__read_txt_file(
-            reboot_cause_path) or "Unknown"
+        reboot_cause_path = self.plugin_data['REBOOT_CAUSE']['reboot_cause_file']
 
-        if sw_reboot_cause != "Unknown":
-            reboot_cause = self.REBOOT_CAUSE_NON_HARDWARE
-            description = sw_reboot_cause
-        else:
-            reboot_cause = self.REBOOT_CAUSE_HARDWARE_OTHER
-            description = 'Unknown reason'
-
-        return (reboot_cause, description)
-
-    def is_modular_chassis(self):
-        """
-        Retrieves whether the sonic instance is part of modular chassis
-        Returns:
-            A bool value, should return False by default or for fixed-platforms.
-            Should return True for supervisor-cards, line-cards etc running as part
-            of modular-chassis.
-        """
-        return False
-
-    def get_sfp(self, index):
-        sfp = None
         try:
-            sfp = self._sfp_list[index]
-        except IndexError:
-            sys.stderr.write("SFP index {} out of range (0-{})\n".format(index, len(self._sfp_list)-1))
+            with open(reboot_cause_path, 'r', errors='replace') as fd:
+                data = fd.read()
+                sw_reboot_cause = data.strip()
+        except IOError:
+            sw_reboot_cause = "Unknown"
 
-        return sfp
+        return ('REBOOT_CAUSE_NON_HARDWARE', sw_reboot_cause)
 
-    def _get_sfp_presence(self):
-        port_pres = {}
-        for port in range(0, NUM_SFP):
-            sfp = self._sfp_list[port]
-            port_pres[port] = 1 if sfp.get_presence() else 0
-
-        return port_pres
-
-    def get_change_event(self, timeout=0):
-        port_dict = {}
-        ret_dict = {'sfp': port_dict}
-        forever = False
-        change_event = False
-
-        if timeout == 0:
-            forever = True
-        elif timeout > 0:
-            timeout = timeout / float(1000)
-        else:
-            return False, ret_dict #Incorrect timeout
-
-        while True:
-            if forever:
-                timer = 1
-            else:
-                timer = min(timeout, 1)
-                start_time = time.time()
-
-            time.sleep(timer)
-            cur_presence = self._get_sfp_presence()
-            for port in range(0, NUM_SFP):
-
-                if cur_presence[port] != self._transceiver_presence[port]:
-                    change_event = True
-                    if cur_presence[port] == 1:
-                        port_dict[port] = '1'
-                    else:
-                        port_dict[port] = '0'
-
-            self._transceiver_presence = cur_presence
-            if change_event is True:
-                break
-
-            if not forever:
-                elapsed_time = time.time() - start_time
-                timeout = round(timeout - elapsed_time, 3)
-                if timeout <= 0:
-                    break
-
-        for port in range(0, NUM_SFP):
-            sfp = self._sfp_list[port]
-            sfp.reinit()
-
-        return True, ret_dict
-
-    def initizalize_system_led(self):
-        self.system_led = ""
-        return True
-
-    def set_status_led(self, color):
+    def get_serial_number(self):
         """
-        Sets the state of the system LED
-
-        Args:
-            color: A string representing the color with which to set the
-                   system LED
+        Retrieves the hardware serial number for the chassis
 
         Returns:
-            bool: True if system LED state is set successfully, False if not
-        """
-        self.system_led = color
-        return True
-
-    def get_status_led(self):
-        """
-        Gets the state of the system LED
-
-        Returns:
-            A string, one of the valid LED color strings which could be vendor
-            specified.
-        """
-        return self.system_led
-
-
-    def get_presence(self):
-        """
-        Retrieves the presence of the Chassis
-        Returns:
-            bool: True if Chassis is present, False if not
-        """
-        return True
-
-    def get_model(self):
-        """
-        Retrieves the model number (or part number) of the device
-        Returns:
-            string: Model/part number of device
-        """
-        return self._eeprom.get_model()
-
-    def get_status(self):
-        """
-        Retrieves the operational status of the device
-        Returns:
-            A boolean value, True if device is operating properly, False if not
-        """
-        return True
-
-    def get_position_in_parent(self):
-        """
-        Retrieves 1-based relative physical position in parent device. If the agent cannot determine the parent-relative position
-        for some reason, or if the associated value of entPhysicalContainedIn is '0', then the value '-1' is returned
-        Returns:
-            integer: The 1-based relative physical position in parent device or -1 if cannot determine the position
-        """
-        return -1
-
-    def is_replaceable(self):
-        """
-        Indicate whether this device is replaceable.
-        Returns:
-            bool: True if it is replaceable.
-        """
-        return False
-
-    def get_revision(self):
-        """
-        Retrieves the hardware revision of the device
-
-        Returns:
-            string: Revision value of device
+            A string containing the hardware serial number for this
+            chassis.
         """
 
-        return '0'
-
-    def get_thermal_manager(self):
-        raise NotImplementedError
+        return self.get_serial()
