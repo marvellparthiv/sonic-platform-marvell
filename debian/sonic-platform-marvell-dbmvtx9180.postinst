@@ -3,7 +3,11 @@
 #
 # see: dh_installdeb(1)
 
-chmod a+x /usr/local/bin/dbmvtx9180-init.sh
+#chmod a+x /usr/local/bin/dbmvtx9180-init.sh
+depmod -a
+systemctl restart kmod
 systemctl enable platform-modules-dbmvtx9180.service
 systemctl start platform-modules-dbmvtx9180.service
+systemctl enable pddf-platform-init.service
+systemctl start pddf-platform-init.service
 exit 0

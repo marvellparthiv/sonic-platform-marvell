@@ -1,95 +1,88 @@
 #!/usr/bin/env python
 
-#############################################################################
-#
-# Module contains an implementation of SONiC Platform Base API and
-# provides the fan status which are available in the platform
-#
-#############################################################################
-
-import os.path
+import os
 
 try:
-    from sonic_platform_base.fan_base import FanBase
+    from sonic_platform_pddf_base.pddf_fan import PddfFan
+    from sonic_platform.psu_fru import PsuFru
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
-SPEED_TOLERANCE = 15
-FAN_PATH = "/sys/bus/i2c/devices/0-0066/"
-SYSFS_PATH = "/sys/bus/i2c/devices/{0}-00{1}"
-PSU_STS_I2C_MAPPING = {
-    0: {
-        "num": 0,
-        "addr": "51"
-    },
-    1: {
-        "num": 0,
-        "addr": "52"
-    },
-}
 
-PSU_HWMON_I2C_MAPPING = {
-    0: {
-        "num": 0,
-        "addr": "59"
-    },
-    1: {
-        "num": 0,
-        "addr": "5a"
-    },
-}
+class Fan(PddfFan):
+    """PDDF Platform-Specific Fan class"""
 
-FAN_NAME_LIST = ["FAN-1F", "FAN-1R", "FAN-2F", "FAN-2R",
-                 "FAN-3F", "FAN-3R", "FAN-4F", "FAN-4R",
-                 "FAN-5F", "FAN-5R", "FAN-6F", "FAN-6R",
-                 "FAN-7F", "FAN-7R"]
+    def __init__(self, tray_idx, fan_idx=0, pddf_data=None, pddf_plugin_data=None, is_psu_fan=False, psu_index=0):
+        # idx is 0-based
+        PddfFan.__init__(self, tray_idx, fan_idx, pddf_data, pddf_plugin_data, is_psu_fan, psu_index)
 
-class Fan(FanBase):
-    """Platform-specific Fan class"""
+    # Provide the functions/variables below for which implementation is to be overwritten
+    # Since psu_fan airflow direction cant be read from sysfs, it is fixed as 'F2B' or 'intake'
 
-    def __init__(self, fan_tray_index, fan_index=0, is_psu_fan=False, psu_index=0):
-        self.fan_index = fan_index
-        self.fan_tray_index = fan_tray_index
-        self.is_psu_fan = is_psu_fan
+    def get_max_speed(self):
+        """
+        Retrieves the max speed
 
+        Returns:
+            An Integer, the max speed
+        """
         if self.is_psu_fan:
-            self.psu_index = psu_index
-            self.psu_status_i2c_num = PSU_STS_I2C_MAPPING[self.psu_index]['num']
-            self.psu_status_i2c_addr = PSU_STS_I2C_MAPPING[self.psu_index]['addr']
-            self.psu_status_path = SYSFS_PATH.format(self.psu_status_i2c_num, self.psu_status_i2c_addr)
-            self.psu_hwmon_i2c_num = PSU_HWMON_I2C_MAPPING[self.psu_index]['num']
-            self.psu_hwmon_i2c_addr = PSU_HWMON_I2C_MAPPING[self.psu_index]['addr']
-            self.psu_hwmon_path = SYSFS_PATH.format(self.psu_hwmon_i2c_num, self.psu_hwmon_i2c_addr)
+            psu_fru = PsuFru(self.fans_psu_index)
+            max_speed = int(self.plugin_data['PSU']['valmap']['PSU_FAN_MAX_SPEED'])
+            for dev in self.plugin_data['PSU']['psu_support_list']:
+                if dev['Manufacturer'] == psu_fru.mfr_id and dev['Name'] == psu_fru.model:
+                    max_speed = int(self.plugin_data['PSU']['valmap'][dev['MaxSpd']])
+                    break           
+        else:
+            max_speed = int(self.plugin_data['FAN']['FAN_MAX_SPEED'])
 
+        return max_speed
 
-        FanBase.__init__(self)
+    def get_speed(self):
+        """
+        Retrieves the speed of fan as a percentage of full speed
 
-    def __search_hwmon_dir_name(self, directory):
-        try:
-            dirs = os.listdir(directory)
-            for file in dirs:
-                if file.startswith("hwmon"):
-                    return file
-        except IOError:
-            pass
-        return ''
+        Returns:
+            An integer, the percentage of full fan speed, in the range 0 (off)
+                 to 100 (full speed)
+        """
+        speed_percentage = 0
 
-    def __read_txt_file(self, file_path):
-        try:
-            with open(file_path, 'r') as fd:
-                data = fd.read()
-                return data.strip()
-        except IOError:
-            pass
-        return None
+        max_speed = self.get_max_speed()
+        speed = int(self.get_speed_rpm())
 
-    def __write_txt_file(self, file_path, data):
-        try:
-            with open(file_path, 'w') as fd:
-                fd.write(data)
-        except IOError:
-            pass
-        return None
+        speed_percentage = round((speed*100)/max_speed)
+        
+        return min(speed_percentage, 100)
+
+    def get_speed_rpm(self):
+        """
+        Retrieves the speed of fan in RPM
+
+        Returns:
+            An integer, Speed of fan in RPM
+        """
+        rpm_speed = 0
+        if self.is_psu_fan:
+            attr = "psu_fan{}_speed_rpm".format(self.fan_index)
+            device = "PSU{}".format(self.fans_psu_index)
+            output = self.pddf_obj.get_attr_name_output(device, attr)
+            if output is None:
+                return rpm_speed
+
+            output['status'] = output['status'].rstrip()
+            if output['status'].isalpha():
+                return rpm_speed
+            else:
+                rpm_speed = int(float(output['status']))
+        else:
+            ucd_path = "/sys/bus/i2c/devices/5-0034/hwmon/"
+            if os.path.exists(ucd_path):
+                hwmon_dir = os.listdir(ucd_path)
+                with open("{}/{}/fan{}_input".format(ucd_path, hwmon_dir[0], self.fantray_index), "rb") as f:
+                    rpm_speed = int(f.read().strip())
+
+        return rpm_speed
 
     def get_direction(self):
         """
@@ -98,47 +91,28 @@ class Fan(FanBase):
             A string, either FAN_DIRECTION_INTAKE or FAN_DIRECTION_EXHAUST
             depending on fan direction
         """
-        direction = 0
+        direction = self.FAN_DIRECTION_NOT_APPLICABLE
         if self.is_psu_fan:
-            path= "{}/psu_fan_dir".format(self.psu_status_path)
-            direction=self.__read_txt_file(path)
-            if direction is None:
-                return self.FAN_DIRECTION_EXHAUST
-        elif self.get_presence():
-            path= "{}/fan{}_direction".format(FAN_PATH, self.fan_tray_index + 1)
-            direction=self.__read_txt_file(path)
-            if direction is None:
-                return self.FAN_DIRECTION_EXHAUST
+            psu_fru = PsuFru(self.fans_psu_index)
+            if psu_fru.mfr_id == "not available":
+                return direction
+            for dev in self.plugin_data['PSU']['psu_support_list']:
+                if dev['Manufacturer'] == psu_fru.mfr_id and dev['Name'] == psu_fru.model:
+                    dir = dev['Dir']
+                    break
+        else:
+            attr = "fan{}_direction".format(self.fantray_index)
+            device = "FAN-CTRL"
+            output = self.pddf_obj.get_attr_name_output(device, attr)
+            if not output:
+                return direction
+            mode = output['mode']
+            val = output['status'].strip()
+            vmap = self.plugin_data['FAN']['direction'][mode]['valmap']
+            if val in vmap:
+                dir = vmap[val]
 
-        return self.FAN_DIRECTION_EXHAUST if int(direction) == 0 else self.FAN_DIRECTION_INTAKE
-
-
-    def get_speed(self):
-        """
-        Retrieves the speed of fan as a percentage of full speed
-        Returns:
-            An integer, the percentage of full fan speed, in the range 0 (off)
-                 to 100 (full speed)
-
-        """
-        speed = 0
-        if self.is_psu_fan:
-            psu_fan_path= "{}/{}".format(self.psu_hwmon_path, 'fan1_input')
-            fan_speed_rpm = self.__read_txt_file(psu_fan_path)
-            if fan_speed_rpm is not None:
-                speed = (int(fan_speed_rpm,10))*100/33000
-                if speed > 100:
-                    speed=100
-            else:
-                return 0
-        elif self.get_presence():
-            path= "{}/fan_duty_cycle_percentage".format(FAN_PATH)
-            speed=self.__read_txt_file(path)
-            if speed is None:
-                return 0
-            return int(int(speed)*100/255)
-
-        return int(speed)
+        return dir
 
     def get_target_speed(self):
         """
@@ -146,149 +120,22 @@ class Fan(FanBase):
         Returns:
             An integer, the percentage of full fan speed, in the range 0 (off)
                  to 100 (full speed)
-
-        Note:
-            speed_pc = pwm_target/255*100
-
-            0   : when PWM mode is use
-            pwm : when pwm mode is not use
         """
+        
         return self.get_speed()
-
-    def get_speed_tolerance(self):
-        """
-        Retrieves the speed tolerance of the fan
-        Returns:
-            An integer, the percentage of variance from target speed which is
-                 considered tolerable
-        """
-        return SPEED_TOLERANCE
 
     def set_speed(self, speed):
         """
         Sets the fan speed
+
         Args:
             speed: An integer, the percentage of full fan speed to set fan to,
                    in the range 0 (off) to 100 (full speed)
+
         Returns:
             A boolean, True if speed is set successfully, False if not
-
         """
 
+        print("Setting Fan speed is not allowed")
         return False
-
-    def set_status_led(self, color):
-        """
-        Sets the state of the fan module status LED
-        Args:
-            color: A string representing the color with which to set the
-                   fan module status LED
-        Returns:
-            bool: True if status LED state is set successfully, False if not
-        """
-        return False #Not supported
-
-    def get_status_led(self):
-        """
-        Gets the state of the fan status LED
-        Returns:
-            A string, one of the predefined STATUS_LED_COLOR_* strings above
-        """
-        status=self.get_presence()
-        if status is None:
-            return  self.STATUS_LED_COLOR_OFF
-
-        return {
-            1: self.STATUS_LED_COLOR_GREEN,
-            0: self.STATUS_LED_COLOR_RED
-        }.get(status, self.STATUS_LED_COLOR_OFF)
-
-    def get_name(self):
-        """
-        Retrieves the name of the device
-            Returns:
-            string: The name of the device
-        """
-
-        fan_name = FAN_NAME_LIST[self.fan_tray_index*2 + self.fan_index] \
-            if not self.is_psu_fan \
-            else "PSU-{} FAN-{}".format(self.psu_index+1, self.fan_index+1)
-
-        return fan_name
-
-    def get_presence(self):
-        """
-        Retrieves the presence of the FAN
-        Returns:
-            bool: True if FAN is present, False if not
-        """
-
-        if self.is_psu_fan:
-            present_path="{}/psu_present".format(self.psu_status_path)
-        else:
-            present_path="{}/fan{}_presence".format(FAN_PATH, self.fan_tray_index + 1)
-
-        val=self.__read_txt_file(present_path)
-        if val is not None:
-            return int(val, 10)==1
-        else:
-            return False
-
-    def get_status(self):
-        """
-        Retrieves the operational status of the device
-        Returns:
-            A boolean value, True if device is operating properly, False if not
-        """
-        if self.is_psu_fan:
-            psu_fan_path= "{}/{}".format(self.psu_status_path, 'psu_power_good')
-            val=self.__read_txt_file(psu_fan_path)
-            if val is not None:
-                return int(val, 10)==1
-            else:
-                return False
-        else:
-            status=self.get_presence()
-            if status is None:
-                return  False
-            return status
-
-
-    def get_model(self):
-        """
-        Retrieves the model number (or part number) of the device
-        Returns:
-            string: Model/part number of device
-        """
-
-        return "N/A"
-
-    def get_serial(self):
-        """
-        Retrieves the serial number of the device
-        Returns:
-            string: Serial number of device
-        """
-        return "N/A"
-
-    def get_position_in_parent(self):
-        """
-        Retrieves 1-based relative physical position in parent device.
-        If the agent cannot determine the parent-relative position
-        for some reason, or if the associated value of
-        entPhysicalContainedIn is'0', then the value '-1' is returned
-        Returns:
-            integer: The 1-based relative physical position in parent device
-            or -1 if cannot determine the position
-        """
-        return (self.fan_tray_index * 2 + self.fan_index + 1) \
-            if not self.is_psu_fan else (self.psu_index + 1)
-
-    def is_replaceable(self):
-        """
-        Indicate whether this device is replaceable.
-        Returns:
-            bool: True if it is replaceable.
-        """
-        return True if not self.is_psu_fan else False
 
