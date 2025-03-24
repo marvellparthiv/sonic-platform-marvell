@@ -11,11 +11,13 @@ try:
     import sys
     from sonic_platform_pddf_base.pddf_chassis import PddfChassis
     from sonic_py_common import device_info
+    from sonic_py_common import logger
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
 NUM_COMPONENT = 2
-
+SYSLOG_IDENTIFIER = "chassis"
+sonic_logger=logger.Logger(SYSLOG_IDENTIFIER)
 class Chassis(PddfChassis):
     """
     PDDF Platform-specific Chassis class
@@ -211,3 +213,21 @@ class Chassis(PddfChassis):
         """
 
         return self.get_serial()
+
+    def get_watchdog(self):
+        """
+        Retrieves hardware watchdog device on this chassis
+
+        Returns:
+            An object derived from WatchdogBase representing the hardware
+            watchdog device
+        """
+        try:
+            if self._watchdog is None:
+                from sonic_platform.watchdog import WatchdogImplBase
+                watchdog_device_path = "/dev/watchdog0"
+                self._watchdog = WatchdogImplBase(watchdog_device_path)
+        except Exception as e:
+            sonic_logger.log_warning(" Fail to load watchdog {}".format(repr(e)))
+
+        return self._watchdog
