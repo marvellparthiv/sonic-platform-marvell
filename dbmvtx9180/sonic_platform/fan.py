@@ -5,9 +5,18 @@ import os
 try:
     from sonic_platform_pddf_base.pddf_fan import PddfFan
     from sonic_platform.psu_fru import PsuFru
+    from sonic_py_common.general import getstatusoutput_noshell, getstatusoutput_noshell_pipe
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
+FPGA_I2C_BUS_NUM=1
+FPGA_DEV_ADDR=0x32
+FPGA_FAN_FAULT_REG_BASE=0x04
+
+fan_to_rpm_reg_offset_map={'fan1_input': 0x20, 'fan2_input': 0x22,
+                           'fan3_input': 0x24, 'fan4_input': 0x26,
+                           'fan5_input': 0x28, 'fan6_input': 0x2a,
+                           'fan7_input': 0x2b, 'fan8_input': 0x2c}
 
 class Fan(PddfFan):
     """PDDF Platform-Specific Fan class"""
@@ -34,9 +43,21 @@ class Fan(PddfFan):
                     max_speed = int(self.plugin_data['PSU']['valmap'][dev['MaxSpd']])
                     break           
         else:
-            max_speed = int(self.plugin_data['FAN']['FAN_MAX_SPEED'])
+            if self.fan_index % 2 == 0:
+                max_speed = int(self.plugin_data['FAN']['FAN_INLET_MAX_SPEED']) + int((int(self.plugin_data['FAN']['FAN_INLET_MAX_SPEED']) * self.get_speed_tolerance())/100)
+            else:
+                max_speed = int(self.plugin_data['FAN']['FAN_EXHAUST_MAX_SPEED']) + int((int(self.plugin_data['FAN']['FAN_EXHAUST_MAX_SPEED']) * self.get_speed_tolerance())/100)
 
         return max_speed
+
+    def get_speed_tolerance(self):
+        """
+        Retrieves tolerance value from pd plugin data
+
+        Returns:
+            An integer, the tolerance percentage
+        """
+        return int(self.plugin_data['FAN']['FAN_MAX_SPEED_TOLERANCE'])
 
     def get_speed(self):
         """
@@ -49,11 +70,65 @@ class Fan(PddfFan):
         speed_percentage = 0
 
         max_speed = self.get_max_speed()
+
         speed = int(self.get_speed_rpm())
 
         speed_percentage = round((speed*100)/max_speed)
         
         return min(speed_percentage, 100)
+
+    def get_presence(self):
+        """
+        Retrieves the fan presence. HW does not have a dedicated presence detection capability.
+        FANs RPM is a deciding criteria to detect presence.
+
+        Returns:
+            An boolean, Fan presence status
+        """
+        if self.is_psu_fan:
+            return True
+        else:
+            attr = "fan{}_input".format(self.fan_index)
+            reg_offset = fan_to_rpm_reg_offset_map.get(attr, 'Not Found')
+            if reg_offset is None:
+                return False
+
+            rpm_speed = self.get_fan_rpm_from_fpga(attr, reg_offset)
+            if int(rpm_speed) != 0:
+                val="1"
+            else:
+                val+"0"
+
+            vmap = self.plugin_data['FAN']['present']['i2c']['valmap']
+            if val in vmap:
+                status = vmap[val]
+            else:
+                status = False
+
+        return status
+
+    def get_fan_rpm_from_fpga(self, attr, reg_offset):
+        """
+        Retrieves fan rpm speed by fpga read
+
+        Returns:
+            An integer, speed of fan in RPM
+        """
+
+        cmdstatus, rpm_0 = getstatusoutput_noshell(['i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(reg_offset)])
+        if cmdstatus != 0:
+            print("Error reading reg {}".format(hex(reg_offset)))
+            return 0
+
+        reg_offset = reg_offset+1
+        cmdstatus, rpm_1 = getstatusoutput_noshell(['i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(reg_offset)])
+        if cmdstatus != 0:
+            print("Error reading reg {}".format(hex(reg_offset)))
+            return 0
+
+        rpm = (int(rpm_0, 16) << 8) + int(rpm_1, 16)
+
+        return rpm
 
     def get_speed_rpm(self):
         """
@@ -76,11 +151,12 @@ class Fan(PddfFan):
             else:
                 rpm_speed = int(float(output['status']))
         else:
-            ucd_path = "/sys/bus/i2c/devices/5-0034/hwmon/"
-            if os.path.exists(ucd_path):
-                hwmon_dir = os.listdir(ucd_path)
-                with open("{}/{}/fan{}_input".format(ucd_path, hwmon_dir[0], self.fantray_index), "rb") as f:
-                    rpm_speed = int(f.read().strip())
+            attr = "fan{}_input".format(self.fan_index)
+            reg_offset = fan_to_rpm_reg_offset_map.get(attr, 'Not Found')
+            if reg_offset is None:
+                return 0
+
+            rpm_speed = self.get_fan_rpm_from_fpga(attr, reg_offset)
 
         return rpm_speed
 
@@ -101,17 +177,14 @@ class Fan(PddfFan):
                     dir = dev['Dir']
                     break
         else:
-            attr = "fan{}_direction".format(self.fantray_index)
-            device = "FAN-CTRL"
-            output = self.pddf_obj.get_attr_name_output(device, attr)
-            if not output:
-                return direction
-            mode = output['mode']
-            val = output['status'].strip()
-            vmap = self.plugin_data['FAN']['direction'][mode]['valmap']
+            if self.fan_index % 2 == 0:
+                val = "0"
+            else:
+                val = "1"
+
+            vmap = self.plugin_data['FAN']['direction']['i2c']['valmap']
             if val in vmap:
                 dir = vmap[val]
-
         return dir
 
     def get_target_speed(self):
