@@ -39,12 +39,10 @@ class Thermal(PddfThermal):
             print("Error reading reg {}".format(hex(reg_offset)))
             return 0
 
-        sensor_gain = float(self.plugin_data['TEMP_SENSOR']['MIBS_TSENE_GAIN'])
-        sensor_offset = float(self.plugin_data['TEMP_SENSOR']['MIBS_TSENE_OFFSET'])
-
-        temperature_float = float(int(temperature, 16) * float(sensor_gain) + sensor_offset)
-
-        return temperature_float
+        '''
+        NOTE : Due to FPGA incorrect value currently returing hardcoded temp value
+        '''
+        return float(60.00)
 
     def get_temperature(self):
         '''
@@ -72,7 +70,7 @@ class Thermal(PddfThermal):
             if temperature == 0:
                 return None
 
-            return (float(temperature)/float(1000))
+            return float(temperature)
 
     def get_high_threshold(self):
         '''
