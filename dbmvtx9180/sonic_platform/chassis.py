@@ -225,7 +225,7 @@ class Chassis(PddfChassis):
         try:
             if self._watchdog is None:
                 from sonic_platform.watchdog import WatchdogImplBase
-                watchdog_device_path = "/dev/watchdog0"
+                watchdog_device_path = "/dev/watchdog1"
                 self._watchdog = WatchdogImplBase(watchdog_device_path)
         except Exception as e:
             sonic_logger.log_warning(" Fail to load watchdog {}".format(repr(e)))
