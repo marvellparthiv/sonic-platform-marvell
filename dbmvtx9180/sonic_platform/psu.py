@@ -16,6 +16,33 @@ class Psu(PddfPsu):
         self.psu_fru = PsuFru(self.psu_index)
                
     # Provide the functions/variables below for which implementation is to be overwritten
+    def get_presence(self):
+        """
+        Retrieves the presence of power suplly unit (psu)
+
+        Returns:
+            bool: True if psu is present, False if not
+        """
+        return True
+
+    def get_powergood_status(self):
+        """
+        Retrieves the powergood status of PSU
+        Returns:
+            A boolean, True if PSU has stablized its output voltages and passed all
+            its internal self-tests, False if not.
+        """
+        return True
+
+    def get_psu_status(self):
+        """
+        Retrieves the status of PSU
+        Returns:
+            A boolean, True if PSU has stablized its output voltages and passed all
+            its internal self-tests, False if not.
+        """
+        return True
+
     def get_power(self):
         """
         Retrieves current energy supplied by PSU
