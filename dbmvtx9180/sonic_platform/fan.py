@@ -27,6 +27,23 @@ class Fan(PddfFan):
 
     # Provide the functions/variables below for which implementation is to be overwritten
     # Since psu_fan airflow direction cant be read from sysfs, it is fixed as 'F2B' or 'intake'
+    def get_model(self):
+        """
+        Retrieves the model number (or part number) of the Fan
+
+        Returns:
+            string: Model/part number of Fan
+        """
+        return 'NA'
+
+    def get_serial(self):
+        """
+        Retrieves the serial number of the Fan
+
+        Returns:
+            string: Serial number of Fan
+        """
+        return 'NA'
 
     def get_max_speed(self):
         """

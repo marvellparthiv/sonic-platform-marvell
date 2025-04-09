@@ -8,17 +8,18 @@
 try:
     import subprocess
     from sonic_platform_base.component_base import ComponentBase
+    from sonic_py_common.general import getstatusoutput_noshell, getstatusoutput_noshell_pipe
 except ImportError as e:
     raise ImportError(str(e) + "- required module not found")
 
-CPLD_SYSFS = {
-    "CPLD1": "/sys/devices/platform/x86_64_ufispace_s6301_56st_lpc/mb_cpld/mb_cpld_1_version_h",
-}
+FPGA_I2C_BUS_NUM=1
+FPGA_DEV_ADDR=0x32
+FPGA_FW_VERSION_REG_OFFSET=0x00
 
 BIOS_VERSION_PATH = "/sys/class/dmi/id/bios_version"
 COMPONENT_LIST= [
-   ("CPLD1", "CPLD 1"),
    ("BIOS", "Basic Input/Output System"),
+   ("SysFPGA", "System FPGA"),
 ]
 
 class Component(ComponentBase):
@@ -55,16 +56,17 @@ class Component(ComponentBase):
         except Exception as e:
             return None
 
-    def _get_cpld_version(self):
+    def _get_fpga_version(self):
         # Retrieves the CPLD firmware version
-        cpld_version = dict()
-        for cpld_name in CPLD_SYSFS:
-            cmd = "cat {}".format(CPLD_SYSFS[cpld_name])
-            status, value = subprocess.getstatusoutput(cmd)
-            if not status:
-               cpld_version[cpld_name] = value.rstrip()
+        fpga_version = dict()
+        cmdstatus, fpga_fw_version = getstatusoutput_noshell(['i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(FPGA_FW_VERSION_REG_OFFSET)])
+        if cmdstatus != 0:
+            print("Error reading reg {}".format(hex(reg_offset)))
+            fpga_version["SysFPGA"] = 'N/A'
+        else:
+            fpga_version["SysFPGA"] = str(fpga_fw_version)
 
-        return cpld_version
+        return fpga_version
 
     def get_name(self):
         """
@@ -92,9 +94,9 @@ class Component(ComponentBase):
 
         if self.name == "BIOS":
             fw_version = self._get_bios_version()
-        elif "CPLD" in self.name:
-            cpld_version = self._get_cpld_version()
-            fw_version = cpld_version.get(self.name)
+        elif "SysFPGA" in self.name:
+            fpga_version = self._get_fpga_version()
+            fw_version = fpga_version.get(self.name)
         return fw_version
 
     def install_firmware(self, image_path):
