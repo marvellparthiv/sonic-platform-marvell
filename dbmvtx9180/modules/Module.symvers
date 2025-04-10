@@ -1,2 +1,0 @@
-0x73834d86	dbmvtx9180_fpga_sysled_set	/sonic/platform/marvell-teralynx/sonic-platform-modules-marvell/dbmvtx9180/modules/marvell_dbmvtx9180_cpld	EXPORT_SYMBOL
-0x9c1df27b	dbmvtx9180_fpga_sysled_get	/sonic/platform/marvell-teralynx/sonic-platform-modules-marvell/dbmvtx9180/modules/marvell_dbmvtx9180_cpld	EXPORT_SYMBOL
