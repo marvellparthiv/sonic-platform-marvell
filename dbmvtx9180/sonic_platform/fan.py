@@ -229,3 +229,33 @@ class Fan(PddfFan):
         print("Setting Fan speed is not allowed")
         return False
 
+    @classmethod
+    def check_direction(cls, name, direction):
+        '''
+        Load pd-plugin to fetch configured fan direction.
+        '''
+        try:
+            import json
+            with open('/usr/share/sonic/platform/pddf/pd-plugin.json') as pd:
+                cls.plugin_data = json.load(pd)
+        except Exception as e:
+            print("Error: Unable to load pd-plugin.json file")
+            return False
+
+        fan_details =  name.split('_')
+        if int(fan_details[1]) % 2 == 0:
+            val = "0"
+        else:
+            val = "1"
+
+        vmap = cls.plugin_data['FAN']['direction']['i2c']['valmap']
+        if val in vmap:
+            fan_dir = vmap[val]
+
+        if not fan_dir:
+            print("Error: Invalid Fan direction")
+            return False
+        else:
+            if direction == fan_dir:
+                return True
+            return False
