@@ -77,10 +77,9 @@ class Thermal(PddfThermal):
             print("Error reading reg {}".format(hex(reg_offset)))
             return 0
 
-        '''
-        NOTE : Due to FPGA incorrect value currently returing hardcoded temp value
-        '''
-        return float(60.00)
+        temperature_float = float(int(temperature, 16))
+
+        return temperature_float
 
     def get_temperature(self):
         '''
