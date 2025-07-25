@@ -132,13 +132,13 @@ class Fan(PddfFan):
             An integer, speed of fan in RPM
         """
 
-        cmdstatus, rpm_0 = getstatusoutput_noshell(['i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(reg_offset)])
+        cmdstatus, rpm_0 = getstatusoutput_noshell(['sudo', 'i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(reg_offset)])
         if cmdstatus != 0:
             print("Error reading reg {}".format(hex(reg_offset)))
             return 0
 
         reg_offset = reg_offset+1
-        cmdstatus, rpm_1 = getstatusoutput_noshell(['i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(reg_offset)])
+        cmdstatus, rpm_1 = getstatusoutput_noshell(['sudo', 'i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(reg_offset)])
         if cmdstatus != 0:
             print("Error reading reg {}".format(hex(reg_offset)))
             return 0

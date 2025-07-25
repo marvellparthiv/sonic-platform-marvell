@@ -59,7 +59,7 @@ class Component(ComponentBase):
     def _get_fpga_version(self):
         # Retrieves the CPLD firmware version
         fpga_version = dict()
-        cmdstatus, fpga_fw_version = getstatusoutput_noshell(['i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(FPGA_FW_VERSION_REG_OFFSET)])
+        cmdstatus, fpga_fw_version = getstatusoutput_noshell(['sudo', 'i2cget', '-f', '-y', str(FPGA_I2C_BUS_NUM), str(FPGA_DEV_ADDR), str(FPGA_FW_VERSION_REG_OFFSET)])
         if cmdstatus != 0:
             print("Error reading reg {}".format(hex(reg_offset)))
             fpga_version["SysFPGA"] = 'N/A'
